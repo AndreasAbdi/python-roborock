@@ -17,6 +17,11 @@ USER_PARAMS_PATH = pathlib.Path.home() / ".cache" / "roborock-user-params.pkl"
 CACHE_PATH = pathlib.Path.home() / ".cache" / "roborock-cache-data.pkl"
 
 
+if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+    # python-roborock relies on add_reader/add_writer on Windows.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
 async def login_flow() -> UserParams:
     """Perform the login flow to obtain UserData from the web API."""
     username = input("Email: ")
@@ -55,7 +60,7 @@ async def main():
     cache = FileCache(CACHE_PATH)
 
     # Create a device manager that can discover devices.
-    device_manager = await create_device_manager(user_params, cache=cache)
+    device_manager = await create_device_manager(user_params)
     devices = await device_manager.get_devices()
 
     # Get all vacuum devices that support the v1 PropertiesApi

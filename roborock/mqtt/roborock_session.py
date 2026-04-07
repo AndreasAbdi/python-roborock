@@ -11,6 +11,7 @@ receiving messages from the vacuum cleaner.
 import asyncio
 import datetime
 import logging
+import os
 import ssl
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -23,9 +24,11 @@ from roborock.diagnostics import Diagnostics, redact_topic_name
 
 from .health_manager import HealthManager
 from .session import MqttParams, MqttSession, MqttSessionException, MqttSessionUnauthorized
+from .wire_capture import WireCapture
 
 _LOGGER = logging.getLogger(__name__)
 _MQTT_LOGGER = logging.getLogger(f"{__name__}.aiomqtt")
+WIRE_CAPTURE_PATH_ENV = "ROBOROCK_MQTT_CAPTURE_PATH"
 
 CLIENT_KEEPALIVE = datetime.timedelta(seconds=45)
 TOPIC_KEEPALIVE = datetime.timedelta(seconds=60)
@@ -84,6 +87,8 @@ class RoborockMqttSession(MqttSession):
         self._diagnostics = params.diagnostics
         self._health_manager = HealthManager(self.restart)
         self._unauthorized_hook = params.unauthorized_hook
+        capture_path = os.getenv(WIRE_CAPTURE_PATH_ENV)
+        self._wire_capture = WireCapture(capture_path) if capture_path else None
 
     @property
     def connected(self) -> bool:
@@ -212,6 +217,8 @@ class RoborockMqttSession(MqttSession):
                     _LOGGER.debug("Processing MQTT messages")
                     async for message in client.messages:
                         _LOGGER.debug("Received message: %s", message)
+                        if self._wire_capture:
+                            self._wire_capture.record("incoming", message.topic.value, message.payload)
                         with self._diagnostics.timer("dispatch_message"):
                             self._listeners(message.topic.value, message.payload)
         except MqttCodeError as err:
@@ -370,6 +377,8 @@ class RoborockMqttSession(MqttSession):
                 raise MqttSessionException("Could not publish message, MQTT client not connected")
             client = self._client
         try:
+            if self._wire_capture:
+                self._wire_capture.record("outgoing", topic, message)
             with self._diagnostics.timer("publish"):
                 await client.publish(topic, message)
         except MqttError as err:
